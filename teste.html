@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rebeca - Assistente de Vendas</title>
+</head>
+<body>
+
+  <h1>🤖 Rebeca</h1>
+  <p>Assistente virtual de vendas do Lucas</p>
+
+  <input
+    id="mensagem"
+    type="text"
+    placeholder="Digite uma mensagem..."
+  >
+
+  <button onclick="enviarMensagem()">Enviar</button>
+
+  <div id="resposta"></div>
+
+  <script>
+    async function enviarMensagem() {
+      const campo = document.getElementById("mensagem");
+      const resposta = document.getElementById("resposta");
+
+      const mensagem = campo.value;
+
+      if (!mensagem) return;
+
+      resposta.innerText = "Rebeca está pensando...";
+
+      const resultado = await fetch("/mensagem", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          mensagem: mensagem
+        })
+      });
+
+      const dados = await resultado.json();
+
+      resposta.innerText = dados.resposta;
+    }
+  </script>
+
+</body>
+</html>
