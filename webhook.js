@@ -1,8 +1,13 @@
 // ============================================================
 // REBECA — SECRETÁRIA DIGITAL DO LUCAS
-// NÍVEL 1 → Regras e catálogo
+//
+// NÍVEL 1 → Atendimento e catálogo
 // NÍVEL 2 → Qualificação e transferência
-// NÍVEL 3 → Estrutura preparada para IA, CRM e WhatsApp
+// NÍVEL 3 → Métricas, CRM e relatório diário
+//
+// IMPORTANTE:
+// Este arquivo já prepara a estrutura para futuramente conectar:
+// WhatsApp + Evolution API + n8n + IA + Banco de Dados + CRM
 // ============================================================
 
 
@@ -37,11 +42,13 @@ const produtos = [
     pagamento:
       "Cartão de crédito em até 10x sem acréscimo ou crediário da loja em até 11x."
   }
+
+  // NOVOS PRODUTOS SERÃO ADICIONADOS AQUI
 ];
 
 
 // ============================================================
-// CATEGORIAS AINDA NÃO CADASTRADAS
+// PRODUTOS QUE AINDA NÃO ESTÃO NO CATÁLOGO
 // ============================================================
 
 const produtosNaoCadastrados = [
@@ -75,19 +82,70 @@ const produtosNaoCadastrados = [
 
 
 // ============================================================
-// SAUDAÇÃO
+// MEMÓRIA TEMPORÁRIA DOS LEADS
+//
+// ATENÇÃO:
+// Esta memória funciona enquanto o servidor estiver rodando.
+// No futuro vamos substituir por um banco de dados real.
 // ============================================================
 
-function obterSaudacao() {
+const leads = {};
 
-  // Horário do Brasil
-  const hora = Number(
+
+// ============================================================
+// MÉTRICAS DO DIA
+// ============================================================
+
+const metricas = {
+  interacoes: 0,
+  novosClientes: 0,
+  leadsQuentes: 0,
+  orcamentos: 0,
+  cpfsEnviados: 0,
+  contratosFechados: 0,
+  valorVendido: 0,
+
+  produtosProcurados: {},
+
+  data: obterDataBrasil()
+};
+
+
+// ============================================================
+// DATA DO BRASIL
+// ============================================================
+
+function obterDataBrasil() {
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo"
+  }).format(new Date());
+}
+
+
+// ============================================================
+// HORÁRIO DO BRASIL
+// ============================================================
+
+function obterHoraBrasil() {
+
+  return Number(
     new Intl.DateTimeFormat("pt-BR", {
       timeZone: "America/Sao_Paulo",
       hour: "2-digit",
       hour12: false
     }).format(new Date())
   );
+}
+
+
+// ============================================================
+// SAUDAÇÃO
+// ============================================================
+
+function obterSaudacao() {
+
+  const hora = obterHoraBrasil();
 
   if (hora >= 5 && hora < 12) {
     return "Bom dia!";
@@ -102,7 +160,7 @@ function obterSaudacao() {
 
 
 // ============================================================
-// NORMALIZAÇÃO DE TEXTO
+// NORMALIZAR TEXTO
 // ============================================================
 
 function normalizarTexto(texto) {
@@ -116,7 +174,7 @@ function normalizarTexto(texto) {
 
 
 // ============================================================
-// LOCALIZAR PRODUTO
+// ENCONTRAR PRODUTO
 // ============================================================
 
 function encontrarProduto(texto) {
@@ -151,20 +209,6 @@ function possuiProdutoNaoCadastrado(texto) {
 
 
 // ============================================================
-// TRANSFERÊNCIA PARA O LUCAS
-// ============================================================
-
-function encaminharParaLucas(tipo = "normal") {
-
-  if (tipo === "venda") {
-    return CONFIG.transferenciaVenda;
-  }
-
-  return CONFIG.transferencia;
-}
-
-
-// ============================================================
 // DETECTAR INTENÇÃO
 // ============================================================
 
@@ -173,11 +217,11 @@ function detectarIntencao(texto) {
   const mensagem = normalizarTexto(texto);
 
   if (
-    mensagem.includes("oi") ||
-    mensagem.includes("ola") ||
-    mensagem.includes("bom dia") ||
-    mensagem.includes("boa tarde") ||
-    mensagem.includes("boa noite")
+    mensagem === "oi" ||
+    mensagem === "ola" ||
+    mensagem === "bom dia" ||
+    mensagem === "boa tarde" ||
+    mensagem === "boa noite"
   ) {
     return "saudacao";
   }
@@ -241,6 +285,15 @@ function detectarIntencao(texto) {
   }
 
   if (
+    mensagem.includes("cpf") ||
+    mensagem.includes("analise de credito") ||
+    mensagem.includes("analise do cpf") ||
+    mensagem.includes("consultar meu cpf")
+  ) {
+    return "cpf";
+  }
+
+  if (
     mensagem.includes("quero comprar") ||
     mensagem.includes("vou comprar") ||
     mensagem.includes("quero esse") ||
@@ -264,7 +317,7 @@ function detectarIntencao(texto) {
 
 
 // ============================================================
-// QUALIFICAÇÃO DO LEAD
+// QUALIFICAR LEAD
 // ============================================================
 
 function qualificarLead(texto) {
@@ -289,7 +342,8 @@ function qualificarLead(texto) {
     mensagem.includes("quanto custa") ||
     mensagem.includes("parcelar") ||
     mensagem.includes("parcelamento") ||
-    mensagem.includes("desconto")
+    mensagem.includes("desconto") ||
+    mensagem.includes("cpf")
   ) {
     temperatura = "morno";
   }
@@ -302,40 +356,283 @@ function qualificarLead(texto) {
 
 
 // ============================================================
-// MEMÓRIA BÁSICA DO LEAD
+// CRIAR / ATUALIZAR LEAD
 // ============================================================
 
-function criarLead(mensagem, nomeCliente = "") {
+function registrarLead(mensagem, nomeCliente = "", identificador = "cliente") {
 
   const produto = encontrarProduto(mensagem);
   const qualificacao = qualificarLead(mensagem);
 
-  return {
-    nome: nomeCliente || null,
+  if (!leads[identificador]) {
 
-    mensagemInicial: mensagem,
+    leads[identificador] = {
 
-    produtoInteresse: produto
-      ? produto.nome
-      : null,
+      nome: nomeCliente || null,
 
-    categoria:
-      produto
-        ? produto.categoria
-        : null,
+      produtoInteresse:
+        produto ? produto.nome : null,
 
-    temperatura:
-      qualificacao.temperatura,
+      categoria:
+        produto ? produto.categoria : null,
 
-    intencao:
-      qualificacao.interesse,
+      temperatura:
+        qualificacao.temperatura,
 
-    precisaHumano:
-      false,
+      intencao:
+        qualificacao.interesse,
 
-    criadoEm:
-      new Date().toISOString()
-  };
+      cpfEnviado: false,
+
+      contratoFechado: false,
+
+      valorVenda: 0,
+
+      interacoes: 0,
+
+      ultimaMensagem: mensagem,
+
+      criadoEm: new Date().toISOString(),
+
+      atualizadoEm: new Date().toISOString()
+    };
+
+    metricas.novosClientes++;
+  }
+
+  else {
+
+    const lead = leads[identificador];
+
+    lead.interacoes++;
+
+    lead.ultimaMensagem = mensagem;
+
+    lead.atualizadoEm = new Date().toISOString();
+
+    if (produto) {
+      lead.produtoInteresse = produto.nome;
+      lead.categoria = produto.categoria;
+    }
+
+    lead.temperatura = qualificacao.temperatura;
+    lead.intencao = qualificacao.interesse;
+  }
+
+  return leads[identificador];
+}
+
+
+// ============================================================
+// REGISTRAR PRODUTO PROCURADO
+// ============================================================
+
+function registrarProdutoProcurado(produto) {
+
+  if (!produto) {
+    return;
+  }
+
+  const nome = produto.nome;
+
+  if (!metricas.produtosProcurados[nome]) {
+    metricas.produtosProcurados[nome] = 0;
+  }
+
+  metricas.produtosProcurados[nome]++;
+}
+
+
+// ============================================================
+// REGISTRAR INTERAÇÃO
+// ============================================================
+
+function registrarInteracao() {
+
+  metricas.interacoes++;
+}
+
+
+// ============================================================
+// REGISTRAR ORÇAMENTO
+// ============================================================
+
+function registrarOrcamento() {
+
+  metricas.orcamentos++;
+}
+
+
+// ============================================================
+// REGISTRAR CPF PARA ANÁLISE
+//
+// NÃO ARMAZENAMOS O CPF COMPLETO.
+// Apenas registramos que ele foi enviado.
+// ============================================================
+
+function registrarCPF(identificador = "cliente") {
+
+  metricas.cpfsEnviados++;
+
+  if (leads[identificador]) {
+    leads[identificador].cpfEnviado = true;
+  }
+}
+
+
+// ============================================================
+// REGISTRAR VENDA
+// ============================================================
+
+function registrarVenda(valor, identificador = "cliente") {
+
+  const valorNumerico = Number(valor) || 0;
+
+  metricas.contratosFechados++;
+
+  metricas.valorVendido += valorNumerico;
+
+  if (leads[identificador]) {
+
+    leads[identificador].contratoFechado = true;
+
+    leads[identificador].valorVenda = valorNumerico;
+  }
+}
+
+
+// ============================================================
+// CONTAR LEADS QUENTES
+// ============================================================
+
+function contarLeadsQuentes() {
+
+  return Object.values(leads)
+    .filter(lead => lead.temperatura === "quente")
+    .length;
+}
+
+
+// ============================================================
+// CALCULAR CONVERSÃO
+// ============================================================
+
+function calcularConversao() {
+
+  if (metricas.interacoes === 0) {
+    return "0%";
+  }
+
+  const taxa =
+    (metricas.contratosFechados / metricas.interacoes) * 100;
+
+  return `${taxa.toFixed(1)}%`;
+}
+
+
+// ============================================================
+// OBTER PRODUTOS MAIS PROCURADOS
+// ============================================================
+
+function obterProdutosMaisProcurados() {
+
+  const lista = Object.entries(metricas.produtosProcurados);
+
+  if (lista.length === 0) {
+    return "Nenhum produto registrado.";
+  }
+
+  lista.sort((a, b) => b[1] - a[1]);
+
+  return lista
+    .slice(0, 5)
+    .map((item, index) =>
+      `${index + 1}. ${item[0]} — ${item[1]} interação(ões)`
+    )
+    .join("\n");
+}
+
+
+// ============================================================
+// OBTER LEADS QUENTES
+// ============================================================
+
+function obterLeadsQuentes() {
+
+  const lista = Object.values(leads)
+    .filter(lead => lead.temperatura === "quente");
+
+  if (lista.length === 0) {
+    return "Nenhum lead quente registrado.";
+  }
+
+  return lista
+    .slice(0, 10)
+    .map(lead => {
+
+      const nome = lead.nome || "Cliente";
+
+      const produto =
+        lead.produtoInteresse || "produto não identificado";
+
+      const cpf =
+        lead.cpfEnviado
+          ? "CPF enviado"
+          : "CPF não enviado";
+
+      return `• ${nome} — ${produto} — ${cpf}`;
+    })
+    .join("\n");
+}
+
+
+// ============================================================
+// GERAR RESUMO DO DIA
+// ============================================================
+
+function gerarResumoDoDia() {
+
+  metricas.leadsQuentes = contarLeadsQuentes();
+
+  return `
+📋 RESUMO DO DIA — REBECA
+
+📅 ${metricas.data}
+
+👥 Interações: ${metricas.interacoes}
+
+🆕 Novos clientes: ${metricas.novosClientes}
+
+🔥 Leads quentes: ${metricas.leadsQuentes}
+
+💰 Orçamentos/propostas: ${metricas.orcamentos}
+
+🪪 CPFs enviados para análise: ${metricas.cpfsEnviados}
+
+✅ Contratos/vendas fechados: ${metricas.contratosFechados}
+
+💵 Valor total vendido: R$ ${metricas.valorVendido.toLocaleString(
+    "pt-BR",
+    {
+      minimumFractionDigits: 2
+    }
+  )}
+
+📈 Conversão: ${calcularConversao()}
+
+
+🛍️ PRODUTOS MAIS PROCURADOS
+
+${obterProdutosMaisProcurados()}
+
+
+🔥 LEADS QUENTES
+
+${obterLeadsQuentes()}
+
+
+🤖 Relatório gerado pela Rebeca.
+`;
 }
 
 
@@ -345,13 +642,18 @@ function criarLead(mensagem, nomeCliente = "") {
 
 function responderProduto(produto) {
 
+  registrarProdutoProcurado(produto);
+
   return `Claro! 😊
 
 🛍️ ${produto.nome}
 
-💰 Valor: R$ ${produto.preco.toLocaleString("pt-BR", {
-    minimumFractionDigits: 2
-  })}
+💰 Valor: R$ ${produto.preco.toLocaleString(
+    "pt-BR",
+    {
+      minimumFractionDigits: 2
+    }
+  )}
 
 💳 ${produto.pagamento}
 
@@ -362,23 +664,48 @@ Se quiser, posso te orientar sobre as formas de pagamento ou encaminhar seu aten
 
 
 // ============================================================
+// TRANSFERÊNCIA
+// ============================================================
+
+function encaminharParaLucas(tipo = "normal") {
+
+  if (tipo === "venda") {
+    return CONFIG.transferenciaVenda;
+  }
+
+  return CONFIG.transferencia;
+}
+
+
+// ============================================================
 // PROCESSAMENTO PRINCIPAL
 // ============================================================
 
-function processarMensagem(mensagem, nomeCliente = "") {
+function processarMensagem(
+  mensagem,
+  nomeCliente = "",
+  identificador = "cliente"
+) {
 
   if (!mensagem || typeof mensagem !== "string") {
 
     return "Desculpe, não consegui entender sua mensagem. Pode me enviar novamente? 😊";
   }
 
+
+  // Registrar interação
+  registrarInteracao();
+
+
+  // Registrar / atualizar lead
+  const lead = registrarLead(
+    mensagem,
+    nomeCliente,
+    identificador
+  );
+
+
   const texto = normalizarTexto(mensagem);
-
-  const saudacao = obterSaudacao();
-
-  const nome = nomeCliente
-    ? `, ${nomeCliente}`
-    : "";
 
   const intencao = detectarIntencao(texto);
 
@@ -386,12 +713,14 @@ function processarMensagem(mensagem, nomeCliente = "") {
 
 
   // ==========================================================
-  // 1. SAUDAÇÃO
+  // SAUDAÇÃO
   // ==========================================================
 
   if (intencao === "saudacao") {
 
-    return `${saudacao}${nome} 😊 Eu sou a Rebeca, secretária digital do Lucas.
+    return `${obterSaudacao()}${nomeCliente ? `, ${nomeCliente}` : ""} 😊
+
+Eu sou a Rebeca, secretária digital do Lucas.
 
 É um prazer falar com você!
 
@@ -407,17 +736,19 @@ Se preferir, é só me dizer o que você está procurando.`;
 
 
   // ==========================================================
-  // 2. PRODUTO NÃO CADASTRADO
+  // PRODUTO NÃO CADASTRADO
   // ==========================================================
 
   if (possuiProdutoNaoCadastrado(texto)) {
+
+    lead.precisaHumano = true;
 
     return encaminharParaLucas();
   }
 
 
   // ==========================================================
-  // 3. PRODUTO CONHECIDO
+  // PRODUTO CONHECIDO
   // ==========================================================
 
   if (produto) {
@@ -427,28 +758,44 @@ Se preferir, é só me dizer o que você está procurando.`;
       intencao === "outro"
     ) {
 
+      registrarOrcamento();
+
       return responderProduto(produto);
     }
 
+
     if (intencao === "compra") {
+
+      lead.temperatura = "quente";
+      lead.precisaHumano = true;
 
       return encaminharParaLucas("venda");
     }
 
+
     if (intencao === "estoque") {
+
+      lead.precisaHumano = true;
 
       return "Vou confirmar a disponibilidade desse produto com o Lucas para você. Só um instante, por favor. 😊";
     }
 
+
     if (intencao === "entrega") {
+
+      lead.precisaHumano = true;
 
       return "Vou confirmar as condições de entrega desse produto com o Lucas para você. Só um instante, por favor. 😊";
     }
 
+
     if (intencao === "negociacao") {
+
+      lead.precisaHumano = true;
 
       return encaminharParaLucas("venda");
     }
+
 
     if (
       intencao === "pagamento" ||
@@ -468,12 +815,31 @@ Também pode existir a possibilidade de parcelamento sem entrada, dependendo das
 Se quiser fechar a compra, posso encaminhar seu atendimento para o Lucas.`;
     }
 
+
     return responderProduto(produto);
   }
 
 
   // ==========================================================
-  // 4. PAGAMENTO
+  // CPF / ANÁLISE
+  // ==========================================================
+
+  if (intencao === "cpf") {
+
+    registrarCPF(identificador);
+
+    return `Claro! 😊
+
+Para algumas opções de parcelamento, a loja pode solicitar o CPF para realizar uma análise.
+
+Vou registrar que você deseja fazer a análise e encaminhar seu atendimento para o Lucas.
+
+Só um instante, por favor.`;
+  }
+
+
+  // ==========================================================
+  // PAGAMENTO / PARCELAMENTO
   // ==========================================================
 
   if (
@@ -489,52 +855,61 @@ Se quiser fechar a compra, posso encaminhar seu atendimento para o Lucas.`;
 
 Também existe a possibilidade de parcelamento sem entrada, dependendo das condições do produto.
 
-Se você me disser qual produto está procurando, posso verificar o que consigo te informar.`;
+Se você me disser qual produto está procurando, posso te orientar melhor.`;
   }
 
 
   // ==========================================================
-  // 5. NEGOCIAÇÃO
+  // NEGOCIAÇÃO
   // ==========================================================
 
   if (intencao === "negociacao") {
 
+    lead.precisaHumano = true;
+
     return encaminharParaLucas("venda");
   }
 
 
   // ==========================================================
-  // 6. COMPRA
+  // COMPRA
   // ==========================================================
 
   if (intencao === "compra") {
 
+    lead.temperatura = "quente";
+    lead.precisaHumano = true;
+
     return encaminharParaLucas("venda");
   }
 
 
   // ==========================================================
-  // 7. ESTOQUE
+  // ESTOQUE
   // ==========================================================
 
   if (intencao === "estoque") {
+
+    lead.precisaHumano = true;
 
     return encaminharParaLucas();
   }
 
 
   // ==========================================================
-  // 8. ENTREGA
+  // ENTREGA
   // ==========================================================
 
   if (intencao === "entrega") {
+
+    lead.precisaHumano = true;
 
     return "Posso te ajudar com isso 😊 Vou encaminhar seu atendimento para o Lucas verificar as condições de entrega para sua região. Só um instante, por favor.";
   }
 
 
   // ==========================================================
-  // 9. OFERTAS
+  // OFERTAS
   // ==========================================================
 
   if (intencao === "ofertas") {
@@ -548,7 +923,7 @@ Se for um produto que ainda não tenho no catálogo, encaminharei seu atendiment
 
 
   // ==========================================================
-  // 10. PREÇO SEM PRODUTO
+  // PREÇO SEM PRODUTO
   // ==========================================================
 
   if (intencao === "preco") {
@@ -558,7 +933,7 @@ Se for um produto que ainda não tenho no catálogo, encaminharei seu atendiment
 
 
   // ==========================================================
-  // 11. RESPOSTA PADRÃO
+  // RESPOSTA PADRÃO
   // ==========================================================
 
   return `Entendi 😊
@@ -570,40 +945,48 @@ Me conte o que você está procurando e vamos encontrar a melhor opção para vo
 
 
 // ============================================================
-// ESTRUTURA PARA FUTURA IA
+// INTERFACE PARA FUTURA IA
 // ============================================================
 
-async function processarComIA(mensagem, contexto = {}) {
+async function processarComIA(
+  mensagem,
+  contexto = {}
+) {
 
   /*
     FUTURO NÍVEL 3
 
-    Aqui poderemos conectar:
+    Aqui poderemos conectar uma IA real:
 
     - Gemini
     - OpenAI
     - Claude
-    - n8n
-    - Banco de produtos
-    - CRM
-    - Evolution API
-    - WhatsApp
 
-    A IA poderá interpretar mensagens complexas
-    e usar o catálogo como fonte de informação.
+    A IA poderá receber:
 
-    Por enquanto, usamos o sistema de regras.
+    mensagem do cliente
+    +
+    histórico da conversa
+    +
+    dados do lead
+    +
+    catálogo de produtos
+
+    E devolver uma resposta natural.
+
+    Por enquanto utilizamos as regras locais.
   */
 
   return processarMensagem(
     mensagem,
-    contexto.nomeCliente || ""
+    contexto.nomeCliente || "",
+    contexto.identificador || "cliente"
   );
 }
 
 
 // ============================================================
-// EXPORTAÇÃO
+// EXPORTAR FUNÇÕES
 // ============================================================
 
 module.exports = {
@@ -618,7 +1001,13 @@ module.exports = {
 
   qualificarLead,
 
-  criarLead,
+  registrarLead,
+
+  registrarCPF,
+
+  registrarVenda,
+
+  gerarResumoDoDia,
 
   obterSaudacao
 };
