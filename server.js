@@ -1,26 +1,70 @@
+// ============================================================
+// REBECA — SERVIDOR PRINCIPAL
+//
+// Responsabilidades:
+// - Gerenciar conexão com PostgreSQL
+// - Receber e processar mensagens
+// - Salvar histórico de conversas
+// - Servir interface de teste
+// ============================================================
+
 const express = require("express");
 const { Pool } = require("pg");
 const { processarMensagem } = require("./webhook");
 
+// ============================================================
+// CONFIGURAÇÕES
+// ============================================================
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Conexão com o PostgreSQL
+// Validar variáveis de ambiente críticas
+if (!process.env.DATABASE_URL) {
+  console.warn("⚠️  DATABASE_URL não definida. Usando modo teste.");
+}
+
+// ============================================================
+// POOL DE CONEXÃO POSTGRESQL
+// ============================================================
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: false
+  ssl: process.env.NODE_ENV === "production" 
+    ? { rejectUnauthorized: false } 
+    : false,
+  max: 10, // máximo de conexões
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000
 });
 
-// Criar as tabelas automaticamente
+// Tratamento de erros da conexão
+pool.on("error", (err) => {
+  console.error("Erro não esperado no pool PostgreSQL:", err);
+});
+
+pool.on("connect", () => {
+  console.log("✅ Nova conexão estabelecida com PostgreSQL");
+});
+
+// ============================================================
+// PREPARAR BANCO DE DADOS
+// ============================================================
+
 async function prepararBanco() {
   try {
+    console.log("📦 Preparando banco de dados...");
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS clientes (
         id SERIAL PRIMARY KEY,
         identificador VARCHAR(255) UNIQUE NOT NULL,
         nome VARCHAR(255),
         produto_procurado VARCHAR(255),
+        temperatura VARCHAR(50) DEFAULT 'frio',
         cpf_enviado BOOLEAN DEFAULT FALSE,
+        contrato_fechado BOOLEAN DEFAULT FALSE,
+        valor_venda NUMERIC(10,2) DEFAULT 0,
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -30,92 +74,21 @@ async function prepararBanco() {
         identificador VARCHAR(255) NOT NULL,
         mensagem TEXT NOT NULL,
         resposta TEXT,
-        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        intencao VARCHAR(100),
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (identificador) REFERENCES clientes(identificador) ON DELETE CASCADE
       );
 
       CREATE TABLE IF NOT EXISTS vendas (
         id SERIAL PRIMARY KEY,
-        identificador VARCHAR(255),
+        identificador VARCHAR(255) NOT NULL,
+        produto_nome VARCHAR(255),
         valor NUMERIC(10,2) NOT NULL,
-        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        data_venda TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (identificador) REFERENCES clientes(identificador) ON DELETE CASCADE
       );
 
       CREATE TABLE IF NOT EXISTS metricas_diarias (
         id SERIAL PRIMARY KEY,
         data DATE UNIQUE NOT NULL,
-        interacoes INTEGER DEFAULT 0,
-        novos_clientes INTEGER DEFAULT 0,
-        leads_quentes INTEGER DEFAULT 0,
-        orcamentos INTEGER DEFAULT 0,
-        cpfs_enviados INTEGER DEFAULT 0,
-        vendas INTEGER DEFAULT 0,
-        valor_total NUMERIC(10,2) DEFAULT 0
-      );
-    `);
-
-    console.log("Banco de dados preparado com sucesso!");
-  } catch (erro) {
-    console.error("Erro ao preparar banco:", erro);
-  }
-}
-
-app.use(express.json());
-app.use(express.static("."));
-
-app.get("/", (req, res) => {
-  res.json({
-    status: "online",
-    sistema: "Rebeca - Assistente Virtual de Vendas",
-    mensagem:
-      "Oi! Sou a Rebeca, assistente virtual de vendas do Lucas 😊 Como posso te ajudar?"
-  });
-});
-
-app.post("/mensagem", async (req, res) => {
-  try {
-    const mensagem = req.body.mensagem;
-
-    if (!mensagem) {
-      return res.status(400).json({
-        erro: "Envie uma mensagem."
-      });
-    }
-
-    const identificador = req.body.identificador || "cliente";
-
-    const resposta = processarMensagem(
-      mensagem,
-      "",
-      identificador
-    );
-
-    // Salvar a conversa
-    await pool.query(
-      `
-      INSERT INTO conversas
-      (identificador, mensagem, resposta)
-      VALUES ($1, $2, $3)
-      `,
-      [identificador, mensagem, resposta]
-    );
-
-    res.json({
-      mensagemRecebida: mensagem,
-      resposta: resposta,
-      banco: "conversa salva com sucesso"
-    });
-  } catch (erro) {
-    console.error("Erro ao processar mensagem:", erro);
-
-    res.status(500).json({
-      erro: "Erro interno ao processar mensagem."
-    });
-  }
-});
-
-// Preparar banco antes de iniciar o servidor
-prepararBanco().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Rebeca rodando na porta ${PORT}`);
-  });
-});
